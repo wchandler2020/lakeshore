@@ -39,8 +39,8 @@ THIRD_PARTY_APPS = [
 
 LOCAL_APPS = [
     "accounts",
-    # "routes",
-    # "workouts",
+    "routes",
+    "workouts",
 ]
 
 INSTALLED_APPS = DJANGO_APPS + THIRD_PARTY_APPS + LOCAL_APPS

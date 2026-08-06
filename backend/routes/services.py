@@ -27,10 +27,12 @@ logger = logging.getLogger(__name__)
 
 # How many seeds to try per request. Higher is more accurate but slower
 # and heavier on GraphHopper. 8 was a reasonable balance in testing.
-DEFAULT_SAMPLE_COUNT = 8
+DEFAULT_SAMPLE_COUNT = 20
 
 # Per-request timeout against GraphHopper, in seconds.
 REQUEST_TIMEOUT = 10
+
+
 
 
 class RouteGenerationError(Exception):
