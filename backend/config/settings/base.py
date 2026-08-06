@@ -38,7 +38,7 @@ THIRD_PARTY_APPS = [
 ]
 
 LOCAL_APPS = [
-    # "accounts",
+    "accounts",
     # "routes",
     # "workouts",
 ]
@@ -93,7 +93,12 @@ AUTH_PASSWORD_VALIDATORS = [
 # Uncomment when the accounts app is ported. Must be set BEFORE the
 # first migrate against a fresh database — Django cannot swap the user
 # model after initial migrations without dropping the database.
-# AUTH_USER_MODEL = "accounts.User"
+AUTH_USER_MODEL = "accounts.User"
+
+AUTHENTICATION_BACKENDS = [
+    "accounts.backends.EmailOrUsernameModelBackend",
+    "django.contrib.auth.backends.ModelBackend",
+]
 
 LANGUAGE_CODE = "en-us"
 TIME_ZONE = "America/Chicago"
