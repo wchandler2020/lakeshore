@@ -1,0 +1,91 @@
+name: runclub
+
+services:
+  db:
+    image: postgis/postgis:16-3.4
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-runclub}
+      POSTGRES_USER: ${POSTGRES_USER:-runclub}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-devpassword}
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-runclub}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  # Routing engine. Generates the round-trip loops.
+  # First boot imports the OSM extract and builds the graph cache —
+  # this takes several minutes and pegs a CPU. Subsequent boots are fast
+  # because the graph-cache volume persists.
+  graphhopper:
+    image: israelhikingmap/graphhopper:10.0
+    command: >
+      --input /data/illinois-latest.osm.pbf
+      --config /config/config.yml
+      --host 0.0.0.0
+    ports:
+      - "8989:8989"
+    volumes:
+      - ./routing/data:/data
+      - ./routing/config.yml:/config/config.yml:ro
+      - ghcache:/data/graph-cache
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8989/health || exit 1"]
+      interval: 15s
+      timeout: 10s
+      retries: 20
+      start_period: 600s
+    environment:
+      JAVA_OPTS: "-Xmx4g -Xms2g"
+
+  api:
+    build:
+      context: ./backend
+    command: python manage.py runserver 0.0.0.0:8000
+    environment:
+      DJANGO_SETTINGS_MODULE: config.settings.local
+      DATABASE_URL: postgis://${POSTGRES_USER:-runclub}:${POSTGRES_PASSWORD:-devpassword}@db:5432/${POSTGRES_DB:-runclub}
+      REDIS_URL: redis://redis:6379/0
+      GRAPHHOPPER_URL: http://graphhopper:8989
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./backend:/app
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  worker:
+    build:
+      context: ./backend
+    command: celery -A config worker -l info
+    environment:
+      DJANGO_SETTINGS_MODULE: config.settings.local
+      DATABASE_URL: postgis://${POSTGRES_USER:-runclub}:${POSTGRES_PASSWORD:-devpassword}@db:5432/${POSTGRES_DB:-runclub}
+      REDIS_URL: redis://redis:6379/0
+      GRAPHHOPPER_URL: http://graphhopper:8989
+    volumes:
+      - ./backend:/app
+    depends_on:
+      - db
+      - redis
+
+volumes:
+  pgdata:
+  ghcache:

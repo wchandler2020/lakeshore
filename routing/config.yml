@@ -1,0 +1,37 @@
+graphhopper:
+  datareader.file: /data/illinois-latest.osm.pbf
+  graph.location: /data/graph-cache
+
+  # IMPORTANT: round_trip is a "flexible mode" algorithm. It is NOT
+  # compatible with Contraction Hierarchies (CH). If you enable
+  # profiles_ch below, round-trip requests will fail with an error
+  # telling you to disable CH. Landmarks (LM) give most of the speed
+  # benefit while keeping flexible algorithms available.
+  import.osm.ignored_highways: motorway,trunk
+  graph.encoded_values: foot_access, hike_rating, mtb_rating, foot_priority, foot_average_speed, bike_priority, bike_access, roundabout, bike_average_speed
+  profiles:
+    - name: foot
+      custom_model_files: [foot.json]
+
+    - name: bike
+      custom_model_files: [bike.json]
+
+  profiles_lm:
+    - profile: foot
+    - profile: bike
+
+  # Deliberately empty. Do not add CH profiles unless you have
+  # separately confirmed round-trip still works.
+  profiles_ch: []
+
+  routing.non_ch.max_waypoint_distance: 1000000
+
+server:
+  application_connectors:
+    - type: http
+      port: 8989
+      bind_host: 0.0.0.0
+  admin_connectors:
+    - type: http
+      port: 8990
+      bind_host: 0.0.0.0

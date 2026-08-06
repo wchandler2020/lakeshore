@@ -1,0 +1,23 @@
+cat > .gitignore <<'EOF'
+.env
+.env.*
+!.env.example
+__pycache__/
+*.py[cod]
+venv/
+.venv/
+*.log
+media/
+staticfiles/
+routing/data/*.pbf
+routing/data/graph-cache/
+node_modules/
+.DS_Store
+EOF
+# GraphHopper graph cache — regenerated from the .pbf on import
+routing/data/*-gh/
+routing/data/graph-cache/
+
+# Scratch
+route.json
+*.dmg
