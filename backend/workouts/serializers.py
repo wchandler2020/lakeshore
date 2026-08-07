@@ -57,6 +57,11 @@ class WorkoutCreateSerializer(serializers.ModelSerializer):
         raw_points = validated_data.pop("points", [])
         user = self.context["request"].user
 
+        if "privacy" not in validated_data:
+            profile = getattr(user, "profile", None)
+            if profile:
+                validated_data["privacy"] = profile.default_run_privacy
+
         workout = Workout(user=user, **validated_data)
 
         if raw_points:
@@ -85,10 +90,10 @@ class WorkoutCreateSerializer(serializers.ModelSerializer):
             workout.average_heart_rate = track.average_heart_rate
             workout.max_heart_rate = track.max_heart_rate
 
-        if not workout.privacy:
-            profile = getattr(user, "profile", None)
-            if profile:
-                workout.privacy = profile.default_run_privacy
+        # if "privacy" not in validated_data:
+        #     profile = getattr(user, "profile", None)
+        #     if profile:
+        #         validated_data["privacy"] = profile.default_run_privacy
 
         workout.save()
         return workout
