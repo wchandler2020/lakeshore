@@ -186,6 +186,13 @@ export interface components {
          * @enum {string}
          */
         ActivityTypeEnum: "run" | "walk" | "hike" | "ride";
+        /**
+         * @description * `public` - Public
+         *     * `followers` - Followers only
+         *     * `private` - Private
+         * @enum {string}
+         */
+        DefaultRunPrivacyEnum: "public" | "followers" | "private";
         PaginatedWorkoutListList: {
             /** @example 123 */
             count: number;
@@ -200,6 +207,20 @@ export interface components {
              */
             previous?: string | null;
             results: components["schemas"]["WorkoutList"][];
+        };
+        PatchedUserProfile: {
+            /** Format: decimal */
+            height_cm?: string | null;
+            /** Format: decimal */
+            weight_kg?: string | null;
+            /** Format: date */
+            date_of_birth?: string | null;
+            preferred_units?: components["schemas"]["PreferredUnitsEnum"];
+            resting_heart_rate?: number | null;
+            max_heart_rate?: number | null;
+            default_run_privacy?: components["schemas"]["DefaultRunPrivacyEnum"];
+            /** Format: date-time */
+            readonly updated_at?: string;
         };
         /** @description Full view, including the path geometry as GeoJSON. */
         PatchedWorkoutDetail: {
@@ -232,6 +253,12 @@ export interface components {
             telemetry?: unknown;
             readonly geometry?: string;
         };
+        /**
+         * @description * `metric` - Metric
+         *     * `imperial` - Imperial
+         * @enum {string}
+         */
+        PreferredUnitsEnum: "metric" | "imperial";
         /**
          * @description * `public` - Public
          *     * `followers` - Followers only
@@ -276,6 +303,30 @@ export interface components {
             elevation?: number | null;
             heart_rate?: number | null;
             cadence?: number | null;
+        };
+        User: {
+            readonly id: number;
+            /** @description Required. 150 characters or fewer. Letters, digits and @/./+/-/_ only. */
+            readonly username: string;
+            /** Format: email */
+            readonly email: string;
+            first_name?: string;
+            last_name?: string;
+            readonly profile: components["schemas"]["UserProfile"];
+        };
+        UserProfile: {
+            /** Format: decimal */
+            height_cm?: string | null;
+            /** Format: decimal */
+            weight_kg?: string | null;
+            /** Format: date */
+            date_of_birth?: string | null;
+            preferred_units?: components["schemas"]["PreferredUnitsEnum"];
+            resting_heart_rate?: number | null;
+            max_heart_rate?: number | null;
+            default_run_privacy?: components["schemas"]["DefaultRunPrivacyEnum"];
+            /** Format: date-time */
+            readonly updated_at: string;
         };
         /**
          * @description Accepts a raw GPS track. Distance, duration, splits and elevation
@@ -422,12 +473,13 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description No response body */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": components["schemas"]["User"];
+                };
             };
         };
     };
@@ -438,14 +490,21 @@ export interface operations {
             path?: never;
             cookie?: never;
         };
-        requestBody?: never;
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["PatchedUserProfile"];
+                "application/x-www-form-urlencoded": components["schemas"]["PatchedUserProfile"];
+                "multipart/form-data": components["schemas"]["PatchedUserProfile"];
+            };
+        };
         responses: {
-            /** @description No response body */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": components["schemas"]["User"];
+                };
             };
         };
     };
