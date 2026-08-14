@@ -20,6 +20,7 @@ import { StatusBar } from "expo-status-bar";
 import { useEffect } from "react";
 
 import { AuthProvider, useAuth } from "@/lib/auth-context";
+import "@/lib/mapbox";
 
 import "../global.css";
 

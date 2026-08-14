@@ -28,7 +28,19 @@
       "expo-router",
       "expo-secure-store",
       "expo-font",
-      "expo-status-bar"
+      "expo-status-bar",
+      [
+        "@rnmapbox/maps",
+        {
+          "RNMapboxMapsVersion": "11.20.1"
+        }
+      ],
+      [
+        "expo-location",
+        {
+          "locationWhenInUsePermission": "Lakeshore uses your location to plan routes and track your runs."
+        }
+      ]
     ]
   }
 }
