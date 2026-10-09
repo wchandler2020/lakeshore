@@ -3,6 +3,7 @@ routes/serializers.py
 """
 
 from rest_framework import serializers
+from .services import DEFAULT_SAMPLE_COUNT
 
 MILES_TO_METERS = 1609.344
 KM_TO_METERS = 1000.0
@@ -24,7 +25,7 @@ class RouteRequestSerializer(serializers.Serializer):
         choices=["foot", "bike"], default="foot"
     )
     samples = serializers.IntegerField(
-        default=8, min_value=1, max_value=20,
+        default=DEFAULT_SAMPLE_COUNT, min_value=1, max_value=20,
         help_text="How many seeds to try. More is slower but more accurate.",
     )
     count = serializers.IntegerField(
