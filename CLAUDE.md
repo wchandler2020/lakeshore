@@ -73,7 +73,9 @@ Routes are ephemeral: they're generated on demand and never persisted. `RouteGen
 **GraphHopper config (`routing/config.yml`):** round-trip is a flexible-mode algorithm, so `profiles_ch` must stay empty because CH breaks round-trip. LM profiles provide the speedup.
 
 ### Workouts (`backend/workouts/`)
-The client uploads raw GPS `points` with the workout. `services.process_track` computes distance, splits, moving time, elevation, and HR stats on the server in one pass. It filters out GPS jitter below 2 m and glitches above 12 m/s, and computes distance with haversine in Python, not PostGIS. Totals the client sends are ignored. Storage is a PostGIS `LineStringField` for the path plus JSONB `telemetry` and `splits`.
+The client uploads raw GPS `points` with the workout. `services.process_track` computes distance, splits, moving time, elevation, and HR stats on the server in one pass. It measures each fix from the last *kept* fix, not the previous raw one, so a 1 Hz walk (1.3 m per fix) still adds up. It skips fixes under `MIN_SEGMENT_M` (5 m) from that point, drops glitches above 12 m/s, and computes distance with haversine in Python, not PostGIS. Moving time subtracts stopped time between raw fixes, because one kept segment can span a stop. Totals the client sends are ignored. Storage is a PostGIS `LineStringField` for the path plus JSONB `telemetry` and `splits`.
+
+**The 5 m threshold is provisional.** It was chosen against synthetic tracks in `TestRealisticSampling` (walk, stationary drift, stationary scatter, walk-stop-walk, curve), not real data. Validate it against a real recorded track, especially a long stop in an urban canyon where the fix can wander more than 5 m. The live-display copy in `mobile/lib/useRunRecorder.ts` must stay in sync.
 
 ### Async
 Celery (`config/celery.py`, app name `lakeshore`) runs on Redis with `autodiscover_tasks()`. Tests run tasks eagerly.

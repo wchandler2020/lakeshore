@@ -22,10 +22,15 @@ EARTH_RADIUS_M = 6_371_008.8
 MILES_TO_METERS = 1609.344
 KM_TO_METERS = 1000.0
 
-# Samples closer together than this are treated as noise and skipped.
-# Consumer GPS jitters by a few metres even when stationary; without
-# this, a run that pauses at a stoplight accumulates phantom distance.
-MIN_SEGMENT_M = 2.0
+# Samples closer than this to the last kept sample are treated as noise
+# and skipped. Consumer GPS jitters by a few metres even when stationary;
+# without this, a run that pauses at a stoplight accumulates phantom
+# distance. Measuring from the last *kept* sample (not the previous raw
+# one) matters at 1 Hz: a 1.3 m/s walk moves less than this per sample,
+# but still clears it every few seconds.
+# Provisional: chosen against synthetic tracks, not yet validated against
+# a real recording. See CLAUDE.md.
+MIN_SEGMENT_M = 5.0
 
 # Speed above which a sample is treated as a GPS glitch rather than
 # real movement. 12 m/s is roughly 2:14/mile — faster than any human
@@ -73,6 +78,14 @@ class ProcessedTrack:
     max_heart_rate: int | None
 
 
+def _is_glitch(a: TrackPoint, b: TrackPoint) -> bool:
+    """True if getting from a to b implies an implausible speed."""
+    elapsed_s = (b.timestamp - a.timestamp).total_seconds()
+    if elapsed_s <= 0:
+        return False
+    return haversine_m(a.lat, a.lng, b.lat, b.lng) / elapsed_s > MAX_PLAUSIBLE_SPEED_MS
+
+
 def process_track(
     points: list[TrackPoint], split_unit_m: float = MILES_TO_METERS
 ) -> ProcessedTrack:
@@ -97,9 +110,26 @@ def process_track(
     points = sorted(points, key=lambda p: p.timestamp)
     start_time = points[0].timestamp
 
+    # A cold GPS often reports its first fix far from the truth. Every
+    # later fix is measured from the last kept one, so anchoring on a bad
+    # first fix would reject what follows as glitches until enough time
+    # passed, then count the bogus offset as distance. Drop leading fixes
+    # until one is plausibly close to the fix after it. Duration still
+    # counts from the first timestamp: the clock was right even if the
+    # position wasn't.
+    first = 0
+    while first < len(points) - 1 and _is_glitch(points[first], points[first + 1]):
+        first += 1
+    points = points[first:]
+
     kept: list[TrackPoint] = [points[0]]
     cumulative_m = 0.0
     moving_s = 0
+    # Time since the last kept sample spent below MOVING_THRESHOLD_MS,
+    # judged on consecutive raw samples. A kept segment can span a stop
+    # (the samples during it were all too close to keep), so this is
+    # subtracted before deciding how much of the segment was moving.
+    dwell_s = 0.0
     gain = 0.0
     loss = 0.0
     splits: list[dict] = []
@@ -107,10 +137,19 @@ def process_track(
     last_split_time = 0.0
 
     for previous, current in zip(points, points[1:]):
+        step_s = (current.timestamp - previous.timestamp).total_seconds()
+        if step_s > 0:
+            step_m = haversine_m(
+                previous.lat, previous.lng, current.lat, current.lng
+            )
+            if step_m / step_s < MOVING_THRESHOLD_MS:
+                dwell_s += step_s
+
+        anchor = kept[-1]
         segment_m = haversine_m(
-            previous.lat, previous.lng, current.lat, current.lng
+            anchor.lat, anchor.lng, current.lat, current.lng
         )
-        elapsed_s = (current.timestamp - previous.timestamp).total_seconds()
+        elapsed_s = (current.timestamp - anchor.timestamp).total_seconds()
 
         if elapsed_s <= 0:
             continue
@@ -126,11 +165,13 @@ def process_track(
         kept.append(current)
         cumulative_m += segment_m
 
-        if segment_m / elapsed_s >= MOVING_THRESHOLD_MS:
-            moving_s += int(elapsed_s)
+        active_s = elapsed_s - dwell_s
+        if active_s > 0 and segment_m / active_s >= MOVING_THRESHOLD_MS:
+            moving_s += int(active_s)
+        dwell_s = 0.0
 
-        if previous.elevation is not None and current.elevation is not None:
-            delta = current.elevation - previous.elevation
+        if anchor.elevation is not None and current.elevation is not None:
+            delta = current.elevation - anchor.elevation
             if delta > 0:
                 gain += delta
             else:

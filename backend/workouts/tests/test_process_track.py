@@ -6,6 +6,8 @@ these should run in milliseconds and cover the edge cases that produce
 wrong distances in production.
 """
 
+import math
+import random
 from datetime import datetime, timedelta, timezone
 
 import pytest
@@ -153,3 +155,141 @@ class TestComputedStats:
         first = result.line.coords[0]
         assert first[0] == pytest.approx(-87.6233)  # lng
         assert first[1] == pytest.approx(41.8827)   # lat
+
+# Degrees per meter at Chicago's latitude, for building tracks in meters.
+ORIGIN_LAT, ORIGIN_LNG = 41.8827, -87.6233
+LAT_DEG_PER_M = 1 / 111_195
+LNG_DEG_PER_M = LAT_DEG_PER_M / math.cos(math.radians(ORIGIN_LAT))
+
+
+def offset_point(north_m, east_m, seconds):
+    return point(
+        ORIGIN_LAT + north_m * LAT_DEG_PER_M,
+        ORIGIN_LNG + east_m * LNG_DEG_PER_M,
+        seconds,
+    )
+
+
+def walk_track():
+    """10 minutes north at 1.3 m/s, one fix per second."""
+    return [offset_point(i * 1.3, 0, i) for i in range(600)]
+
+
+def drift_track(seed=42, step_sigma_m=0.4, max_radius_m=2.0):
+    """
+    5 minutes standing still, one fix per second. Real GPS error drifts
+    rather than jumping independently each second, so each fix is a small
+    random step from the previous one, pulled back onto the boundary if
+    it wanders more than max_radius_m from the true position.
+    """
+    rng = random.Random(seed)
+    north = east = 0.0
+    points = []
+    for i in range(300):
+        points.append(offset_point(north, east, i))
+        north += rng.gauss(0, step_sigma_m)
+        east += rng.gauss(0, step_sigma_m)
+        r = math.hypot(north, east)
+        if r > max_radius_m:
+            north *= max_radius_m / r
+            east *= max_radius_m / r
+    return points
+
+
+def scatter_track(seed=42, spread_m=1.5):
+    """
+    5 minutes standing still, one fix per second, each fix independently
+    scattered within ±spread_m on each axis. Consecutive fixes can land
+    over 4 m apart, which is what catches a too-small threshold.
+    """
+    rng = random.Random(seed)
+    return [
+        offset_point(
+            rng.uniform(-spread_m, spread_m), rng.uniform(-spread_m, spread_m), i
+        )
+        for i in range(300)
+    ]
+
+
+def walk_stop_walk_track():
+    """Walk 60 s at 1.3 m/s, stand still 60 s, walk 60 s. One fix per second."""
+    points = []
+    north_m = 0.0
+    for i in range(181):
+        if i > 0 and not 60 < i <= 120:
+            north_m += 1.3
+        points.append(offset_point(north_m, 0, i))
+    return points
+
+
+CURVE_RADIUS_M = 200
+CURVE_ARC_M = CURVE_RADIUS_M * math.pi / 2
+
+
+def curve_track():
+    """A quarter circle of 200 m radius at 3 m/s, one fix per second."""
+    step_rad = 3 / CURVE_RADIUS_M
+    points = []
+    for i in range(math.ceil(CURVE_ARC_M / 3) + 1):
+        theta = min(i * step_rad, math.pi / 2)
+        points.append(offset_point(
+            CURVE_RADIUS_M * math.sin(theta),
+            CURVE_RADIUS_M * (1 - math.cos(theta)),
+            i,
+        ))
+    return points
+
+
+class TestRealisticSampling:
+    """Tracks shaped like what the app actually uploads: one fix per second."""
+
+    def test_slow_walk_at_1hz_accumulates_distance(self):
+        """
+        1.3 m/s sampled every second gives 1.3 m segments — each one under
+        MIN_SEGMENT_M. Jitter filtering must not throw away steady movement.
+        """
+        result = process_track(walk_track())
+        assert result.distance_m == pytest.approx(780, rel=0.10)
+
+    def test_stationary_drift_at_1hz_stays_near_zero(self):
+        """Five minutes standing still while the GPS fix wanders ~2 m."""
+        result = process_track(drift_track())
+        assert result.distance_m < 20
+
+    def test_stationary_scatter_at_1hz_stays_near_zero(self):
+        """
+        Five minutes standing still with independent ±1.5 m scatter per
+        fix. Unlike drift, consecutive fixes can jump several metres.
+        """
+        result = process_track(scatter_track())
+        assert result.distance_m < 20
+
+    def test_stop_at_1hz_excluded_from_moving_time(self):
+        """
+        A minute stopped mid-walk must not count as moving, even though
+        the segment that ends the stop spans it.
+        """
+        result = process_track(walk_stop_walk_track())
+        assert result.duration_s == 180
+        assert result.moving_time_s == pytest.approx(120, abs=12)
+
+    def test_bad_first_fix_is_dropped(self):
+        """
+        A cold GPS's first fix can be hundreds of metres off. Anchoring on
+        it rejects the real track as glitches and counts the offset as
+        distance.
+        """
+        points = [offset_point(i * 3, 0, i) for i in range(601)]  # 1800 m
+        points[0] = offset_point(-500, 0, 0)
+
+        result = process_track(points)
+        assert result.distance_m == pytest.approx(1800, rel=0.05)
+        assert result.duration_s == 600
+
+    def test_curved_course_at_1hz_matches_arc_length(self):
+        """
+        Any smoothing or thresholding that cuts corners shows up here as
+        lost distance.
+        """
+        result = process_track(curve_track())
+        assert result.distance_m == pytest.approx(CURVE_ARC_M, rel=0.03)
