@@ -6,5 +6,6 @@ class AccountsConfig(AppConfig):
     name = 'accounts'
 
     def ready(self):
-        from . import signals
-        
+        # Imported for its side effect: registers the post_save handler that
+        # creates each user's UserProfile. Removing it breaks signup.
+        from . import signals  # noqa: F401
