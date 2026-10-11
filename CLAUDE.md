@@ -28,12 +28,14 @@ docker compose run --rm api pytest
 docker compose run --rm api ruff check .          # CI runs this
 docker compose run --rm api python manage.py makemigrations
 docker compose run --rm api python manage.py migrate
+docker compose run --rm api python manage.py seed_dev   # dev login: dev@lakeshore.test / devpassword
 
 ruff check .                                    # lint (CI runs this)
 # DJANGO_SETTINGS_MODULE=config.settings.test pytest -v
 # DJANGO_SETTINGS_MODULE=config.settings.test pytest workouts/tests/test_process_track.py::test_name
 python manage.py makemigrations && python manage.py migrate
 ```
+- `seed_dev` creates or updates the dev user (username `dev`) and resets its password, so it's safe to re-run. It refuses to run unless `DEBUG=True`, so use `config.settings.local`; it won't run under `test` or `base`.
 - There's no pytest.ini or pyproject, so you have to set `DJANGO_SETTINGS_MODULE` yourself (CI sets it as an env var).
 - Tests need a live PostGIS database. Docker publishes Postgres on host port **5433**, but the default `DATABASE_URL` in `config/settings/base.py` points at 5432, so set `DATABASE_URL=postgis://runclub:devpassword@localhost:5433/runclub` when you run outside Docker. Another option is `docker compose exec api pytest`.
 - On the host, GeoDjango needs GDAL/GEOS/PROJ (`brew install gdal geos proj`). A local venv lives at `backend/.venv`.
