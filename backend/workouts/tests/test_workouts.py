@@ -47,6 +47,21 @@ class TestWorkoutIngest:
         assert workout.path is not None
         assert workout.average_heart_rate is not None
 
+    def test_create_responds_with_detail_view(self, auth_client, user):
+        """The client navigates straight to the result, so it needs the
+        computed totals and geometry back from the create call."""
+        response = auth_client.post(
+            reverse("workout-list"), track_payload(), format="json"
+        )
+        assert response.status_code == 201
+
+        workout = Workout.objects.get(user=user)
+        assert response.data["id"] == workout.id
+        assert response.data["distance_m"] == workout.distance_m
+        assert response.data["moving_time_s"] == workout.moving_time_s
+        assert response.data["geometry"]["type"] == "LineString"
+        assert "points" not in response.data
+
     def test_client_cannot_spoof_distance(self, auth_client, user):
         """
         Distance must be derived from the track, never accepted from

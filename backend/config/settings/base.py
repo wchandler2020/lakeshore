@@ -129,6 +129,10 @@ SPECTACULAR_SETTINGS = {
     "DESCRIPTION": "Running, route planning, training plans, and social.",
     "VERSION": "0.1.0",
     "SERVE_INCLUDE_SCHEMA": False,
+    # Without this the GeoJSON "type" field's enum is named plain TypeEnum.
+    "ENUM_NAME_OVERRIDES": {
+        "GeometryTypeEnum": [("LineString", "LineString")],
+    },
 }
 
 from datetime import timedelta  # noqa: E402

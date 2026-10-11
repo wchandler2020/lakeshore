@@ -117,11 +117,9 @@ export interface paths {
         get: operations["v1_workouts_list"];
         put?: never;
         /**
-         * @description Workout history and GPS ingest.
-         *
-         *     Scoped to the requesting user for now. When the social graph lands,
-         *     this widens to include followed athletes' public workouts — but the
-         *     default stays restrictive rather than permissive.
+         * @description Ingest a track and respond with the full detail view, so the
+         *     client gets the server-computed totals and geometry without a
+         *     second request.
          */
         post: operations["v1_workouts_create"];
         delete?: never;
@@ -193,6 +191,17 @@ export interface components {
          * @enum {string}
          */
         DefaultRunPrivacyEnum: "public" | "followers" | "private";
+        /**
+         * @description * `LineString` - LineString
+         * @enum {string}
+         */
+        GeometryTypeEnum: "LineString";
+        /** @description GeoJSON LineString. Schema-only: documents what get_geometry returns. */
+        LineStringGeometry: {
+            type: components["schemas"]["GeometryTypeEnum"];
+            /** @description [lng, lat] pairs. */
+            coordinates: number[][];
+        };
         PaginatedWorkoutListList: {
             /** @example 123 */
             count: number;
@@ -251,7 +260,7 @@ export interface components {
             calories?: number | null;
             splits?: unknown;
             telemetry?: unknown;
-            readonly geometry?: string;
+            readonly geometry?: components["schemas"]["LineStringGeometry"] | null;
         };
         /**
          * @description * `metric` - Metric
@@ -376,7 +385,7 @@ export interface components {
             calories?: number | null;
             splits?: unknown;
             telemetry?: unknown;
-            readonly geometry: string;
+            readonly geometry: components["schemas"]["LineStringGeometry"] | null;
         };
         /**
          * @description Summary view. Deliberately excludes geometry and telemetry —
@@ -593,7 +602,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["WorkoutCreate"];
+                    "application/json": components["schemas"]["WorkoutDetail"];
                 };
             };
         };

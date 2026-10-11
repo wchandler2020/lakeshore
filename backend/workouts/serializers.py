@@ -2,6 +2,7 @@
 workouts/serializers.py
 """
 
+from drf_spectacular.utils import extend_schema_field
 from rest_framework import serializers
 
 from .models import Workout
@@ -127,6 +128,18 @@ class WorkoutListSerializer(serializers.ModelSerializer):
         ]
 
 
+class LineStringGeometrySerializer(serializers.Serializer):
+    """GeoJSON LineString. Schema-only: documents what get_geometry returns."""
+
+    type = serializers.ChoiceField(choices=["LineString"])
+    coordinates = serializers.ListField(
+        child=serializers.ListField(
+            child=serializers.FloatField(), min_length=2, max_length=2
+        ),
+        help_text="[lng, lat] pairs.",
+    )
+
+
 class WorkoutDetailSerializer(WorkoutListSerializer):
     """Full view, including the path geometry as GeoJSON."""
 
@@ -142,6 +155,7 @@ class WorkoutDetailSerializer(WorkoutListSerializer):
             "geometry",
         ]
 
+    @extend_schema_field(LineStringGeometrySerializer(allow_null=True))
     def get_geometry(self, obj):
         if not obj.path:
             return None
