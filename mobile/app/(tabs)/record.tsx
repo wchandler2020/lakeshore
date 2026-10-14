@@ -25,6 +25,7 @@ import { ActivityIndicator, Alert, Pressable, Text, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
 import { workouts } from "@/lib/api/endpoints";
+import { useAuth } from "@/lib/auth-context";
 import { useRunRecorder, type RecordedRun } from "@/lib/useRunRecorder";
 
 const METERS_PER_MILE = 1609.344;
@@ -35,12 +36,13 @@ const FALLBACK: [number, number] = [-87.6233, 41.8827];
 
 export default function Record() {
   const router = useRouter();
-  const recorder = useRunRecorder();
+  const { user } = useAuth();
+  const recorder = useRunRecorder(user?.id ?? null);
   const { status, points, start, pause, resume, stop, reset } = recorder;
 
-  // A stopped run waiting to upload. Kept until the upload succeeds or
-  // the runner discards it, so a failed upload never loses the run.
-  const [pending, setPending] = useState<RecordedRun | null>(null);
+  // A stopped run waiting to upload. The recorder keeps it on disk until
+  // reset(), so a failed upload — or a relaunch — never loses the run.
+  const pending = recorder.stoppedRun;
   const [uploading, setUploading] = useState(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
 
@@ -83,7 +85,6 @@ export default function Record() {
           ended_at: run.ended_at,
           points: run.points,
         });
-        setPending(null);
         reset();
         router.push(`/workouts/${created.id}`);
       } catch {
@@ -107,7 +108,6 @@ export default function Record() {
             Alert.alert("Too short to save", "Not enough GPS points were recorded.");
             return;
           }
-          setPending(run);
           upload(run);
         },
       },
@@ -121,7 +121,6 @@ export default function Record() {
         text: "Discard",
         style: "destructive",
         onPress: () => {
-          setPending(null);
           setUploadError(null);
           reset();
         },
@@ -187,10 +186,18 @@ export default function Record() {
           shadowOffset: { width: 0, height: -4 },
         }}
       >
-        {(recorder.error || uploadError) && (
+        {recorder.error || uploadError ? (
           <Text className="font-sans mb-3 text-sm text-ember-500">
             {uploadError ?? recorder.error}
           </Text>
+        ) : (
+          recorder.recovered && (
+            <Text className="font-sans mb-3 text-sm text-fog">
+              {pending
+                ? "This run didn't finish saving. Save it now or discard it."
+                : "Your run was interrupted. Resume it or finish to save."}
+            </Text>
+          )
         )}
 
         <View className="flex-row items-baseline">
