@@ -6,7 +6,10 @@
  *
  * Every fix and every start/pause/resume/stop is appended to a run file
  * on disk (lib/run-log.ts) before it's shown, so the file is the record
- * of the run and the on-screen state is a cache of it. stop() reads the
+ * of the run and the on-screen state is a cache of it. Fixes come from
+ * the background location task in lib/run-location-task.ts, which keeps
+ * recording while the phone is locked; GPS updates run only while the
+ * run is recording, not while it's paused. stop() reads the
  * file back to build the upload. If the app dies mid-run, the next launch
  * replays the file and the run comes back paused, or ready to upload if
  * it had already been stopped.
@@ -20,6 +23,14 @@ import { useCallback, useEffect, useRef, useState } from "react";
 
 import type { TrackPoint } from "./api/types";
 import { appendEvent, createRun, deleteRun, listRuns, newRunId, readEvents } from "./run-log";
+import {
+  attachRun,
+  commitRunEvent,
+  detachRun,
+  startRunLocationUpdates,
+  stopRunLocationUpdates,
+  subscribeRun,
+} from "./run-location-task";
 import { applyEvent, replay, type RunEvent, type RunState } from "./run-track";
 
 export type RecorderStatus = "idle" | "starting" | "recording" | "paused" | "stopped";
@@ -31,10 +42,6 @@ export interface RecordedRun {
 }
 
 const METERS_PER_MILE = 1609.344;
-
-// Fixes worse than this are dropped entirely. The first few fixes after
-// the GPS wakes up are often 50–100 m off and would show up as a jump.
-const MAX_HORIZONTAL_ACCURACY_M = 30;
 
 // Current pace is averaged over this trailing window. A single 1 s
 // segment is far too noisy to show.
@@ -71,16 +78,16 @@ export function useRunRecorder(userId: number | null) {
   const [paceSPerMi, setPaceSPerMi] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  // Mirrors of state for the location callback and stop(), which need
-  // current values without waiting on a re-render.
+  // Mirrors of state for the callbacks below, which need current values
+  // without waiting on a re-render.
   const runIdRef = useRef<string | null>(null);
   const runRef = useRef<RunState | null>(null);
   const startingRef = useRef(false);
-  const subscriptionRef = useRef<Location.LocationSubscription | null>(null);
   // Live-only; not worth persisting since a recovered run starts paused.
   const paceSamplesRef = useRef<DistanceSample[]>([]);
-  // Bumped on every start/stop so a watchPositionAsync that resolves after
-  // stop() or unmount knows to tear itself down.
+  // Bumped whenever location updates should stop (pause, stop, reset,
+  // unmount) so a startLocationUpdatesAsync that resolves afterwards
+  // knows to tear itself down.
   const sessionRef = useRef(0);
 
   const status: RecorderStatus = run?.status ?? (starting ? "starting" : "idle");
@@ -95,79 +102,44 @@ export function useRunRecorder(userId: number | null) {
     setStarting(next);
   }, []);
 
-  /**
-   * Writes the event to the run file, then applies it to the on-screen
-   * state. A point that fails to write is not shown, so the screen never
-   * displays data the file doesn't have. Control events are applied
-   * either way so the buttons still respond.
-   */
-  const commit = useCallback(
-    (event: RunEvent) => {
-      const runId = runIdRef.current;
-      if (runId === null) return;
-      try {
-        appendEvent(runId, event);
-      } catch {
-        setError(SAVE_ERROR);
-        if (event.type === "point") return;
-      }
-      const next = applyEvent(runRef.current, event);
-      if (next !== runRef.current) {
-        setRunBoth(next);
+  // Every change to the run — control events from the buttons and fixes
+  // from the background task — arrives here, after it's been written.
+  useEffect(
+    () =>
+      subscribeRun((change) => {
+        if (change.kind === "error") {
+          setError(change.message);
+          return;
+        }
+        const { event, state, saved } = change;
+        if (!saved) setError(SAVE_ERROR);
+        if (state === runRef.current) return;
+
+        const before = runRef.current?.distanceM ?? 0;
+        setRunBoth(state);
         setNow(Date.now());
-      }
-    },
+
+        const after = state?.distanceM ?? before;
+        if (event.type === "point" && after > before) {
+          const samples = paceSamplesRef.current;
+          samples.push({ t: event.at, cumulativeM: after });
+          while (samples.length > 0 && event.at - samples[0].t > PACE_WINDOW_MS) samples.shift();
+        }
+      }),
     [setRunBoth],
   );
 
-  const removeSubscription = useCallback(() => {
-    subscriptionRef.current?.remove();
-    subscriptionRef.current = null;
+  const stopUpdates = useCallback(() => {
+    sessionRef.current++;
+    void stopRunLocationUpdates();
   }, []);
 
-  const handleLocation = useCallback(
-    (loc: Location.LocationObject) => {
-      const current = runRef.current;
-      if (current?.status !== "recording" || current.segmentStart === null) return;
-
-      const { latitude, longitude, altitude, accuracy } = loc.coords;
-      const t = loc.timestamp;
-
-      // iOS can hand back a cached fix from before the current segment.
-      if (t < current.segmentStart) return;
-      if (accuracy !== null && accuracy > MAX_HORIZONTAL_ACCURACY_M) return;
-
-      const before = current.distanceM;
-      commit({ type: "point", at: t, lat: latitude, lng: longitude, ele: altitude });
-
-      const after = runRef.current?.distanceM ?? before;
-      if (after > before) {
-        const samples = paceSamplesRef.current;
-        samples.push({ t, cumulativeM: after });
-        while (samples.length > 0 && t - samples[0].t > PACE_WINDOW_MS) samples.shift();
-      }
-    },
-    [commit],
-  );
-
-  const subscribe = useCallback(async () => {
+  /** Starts GPS updates, unless stopUpdates() is called while it's waiting. */
+  const startUpdates = useCallback(async () => {
     const session = sessionRef.current;
-    const sub = await Location.watchPositionAsync(
-      {
-        accuracy: Location.Accuracy.BestForNavigation,
-        timeInterval: 1000,
-        distanceInterval: 0,
-      },
-      handleLocation,
-      (reason) => setError(reason),
-    );
-    if (session !== sessionRef.current) {
-      // stop() or unmount happened while we were waiting.
-      sub.remove();
-      return;
-    }
-    subscriptionRef.current = sub;
-  }, [handleLocation]);
+    await startRunLocationUpdates();
+    if (session !== sessionRef.current) await stopRunLocationUpdates();
+  }, []);
 
   // Recover an interrupted run left on disk by a previous launch. Files
   // that are empty, unreadable or recorded by a different user are
@@ -203,12 +175,16 @@ export function useRunRecorder(userId: number | null) {
     }
     if (runId === undefined || state === null) return;
 
+    // Updates left running by a previous JS context have nobody to
+    // resume them for.
+    void stopRunLocationUpdates();
     runIdRef.current = runId;
     runRef.current = state;
+    attachRun(runId, state);
     if (state.status === "recording") {
       // The app died mid-run. We don't know what happened after the last
       // event, so close the segment there and come back paused.
-      commit({ type: "pause", at: state.lastAt });
+      commitRunEvent({ type: "pause", at: state.lastAt });
     } else {
       setRunBoth(state);
     }
@@ -216,7 +192,7 @@ export function useRunRecorder(userId: number | null) {
       setStoppedRun(toRecordedRun(state, state.endedAt));
     }
     setRecovered(true);
-  }, [userId, commit, setRunBoth]);
+  }, [userId, setRunBoth]);
 
   const start = useCallback(async () => {
     if (startingRef.current || runRef.current !== null || userId === null) return;
@@ -243,14 +219,17 @@ export function useRunRecorder(userId: number | null) {
       setPaceSPerMi(null);
       const startEvent: RunEvent = { type: "start", at, userId };
       appendEvent(runId, startEvent);
-      setRunBoth(applyEvent(null, startEvent));
+      const state = applyEvent(null, startEvent);
+      attachRun(runId, state);
+      setRunBoth(state);
       setNow(at);
       setStartingBoth(false);
 
-      await subscribe();
+      await startUpdates();
     } catch (e) {
       if (session !== sessionRef.current) return;
-      removeSubscription();
+      stopUpdates();
+      detachRun();
       if (runId !== null) {
         try {
           deleteRun(runId);
@@ -261,19 +240,25 @@ export function useRunRecorder(userId: number | null) {
       setStartingBoth(false);
       setError(e instanceof Error ? e.message : String(e));
     }
-  }, [userId, removeSubscription, setRunBoth, setStartingBoth, subscribe]);
+  }, [userId, setRunBoth, setStartingBoth, startUpdates, stopUpdates]);
 
   const pause = useCallback(() => {
     if (runRef.current?.status !== "recording") return;
-    commit({ type: "pause", at: Date.now() });
+    commitRunEvent({ type: "pause", at: Date.now() });
+    stopUpdates();
     paceSamplesRef.current = [];
     setPaceSPerMi(null);
-  }, [commit]);
+  }, [stopUpdates]);
 
-  const resume = useCallback(() => {
+  const resume = useCallback(async () => {
     if (runRef.current?.status !== "paused") return;
-    commit({ type: "resume", at: Date.now() });
-  }, [commit]);
+    commitRunEvent({ type: "resume", at: Date.now() });
+    try {
+      await startUpdates();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    }
+  }, [startUpdates]);
 
   /**
    * Ends the recording and returns everything the upload needs, read back
@@ -291,10 +276,9 @@ export function useRunRecorder(userId: number | null) {
     const current = runRef.current;
     if (current?.status !== "recording" && current?.status !== "paused") return null;
 
-    sessionRef.current++;
-    removeSubscription();
+    stopUpdates();
     const at = Date.now();
-    commit({ type: "stop", at });
+    commitRunEvent({ type: "stop", at });
     setPaceSPerMi(null);
 
     // Build the upload from the file, not memory. Fall back to memory only
@@ -308,7 +292,7 @@ export function useRunRecorder(userId: number | null) {
     const recorded = toRecordedRun(fromFile ?? runRef.current!, at);
     setStoppedRun(recorded);
     return recorded;
-  }, [commit, removeSubscription, setStartingBoth]);
+  }, [setStartingBoth, stopUpdates]);
 
   /**
    * Deletes the run file and clears the recorder. Call after a successful
@@ -317,8 +301,8 @@ export function useRunRecorder(userId: number | null) {
   const reset = useCallback(() => {
     const current = runRef.current;
     if (current?.status === "recording" || current?.status === "paused") return;
-    sessionRef.current++;
-    removeSubscription();
+    stopUpdates();
+    detachRun();
     if (runIdRef.current !== null) {
       try {
         deleteRun(runIdRef.current);
@@ -332,7 +316,7 @@ export function useRunRecorder(userId: number | null) {
     setRecovered(false);
     setPaceSPerMi(null);
     setError(null);
-  }, [removeSubscription, setRunBoth, setStartingBoth]);
+  }, [setRunBoth, setStartingBoth, stopUpdates]);
 
   // Tick the clock and recompute pace once a second while recording.
   useEffect(() => {
@@ -355,12 +339,15 @@ export function useRunRecorder(userId: number | null) {
     return () => clearInterval(id);
   }, [status]);
 
+  // Leaving the screen (e.g. signing out) stops recording. The run stays
+  // on disk and comes back paused through recovery on the next mount.
   useEffect(
     () => () => {
-      sessionRef.current++;
-      removeSubscription();
+      stopUpdates();
+      detachRun();
+      runIdRef.current = null;
     },
-    [removeSubscription],
+    [stopUpdates],
   );
 
   const elapsedMs =

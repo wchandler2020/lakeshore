@@ -38,7 +38,11 @@
       [
         "expo-location",
         {
-          "locationWhenInUsePermission": "Lakeshore uses your location to plan routes and track your runs."
+          "locationWhenInUsePermission": "Lakeshore uses your location to plan routes and track your runs.",
+          "locationAlwaysAndWhenInUsePermission": false,
+          "locationAlwaysPermission": false,
+          "isIosBackgroundLocationEnabled": true,
+          "isAndroidForegroundServiceEnabled": true
         }
       ]
     ]

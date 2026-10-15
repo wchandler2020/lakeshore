@@ -19,8 +19,7 @@ import Mapbox, {
   UserTrackingMode,
 } from "@rnmapbox/maps";
 import { useRouter } from "expo-router";
-import { activateKeepAwakeAsync, deactivateKeepAwake } from "expo-keep-awake";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import { ActivityIndicator, Alert, Pressable, Text, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
@@ -29,7 +28,6 @@ import { useAuth } from "@/lib/auth-context";
 import { useRunRecorder, type RecordedRun } from "@/lib/useRunRecorder";
 
 const METERS_PER_MILE = 1609.344;
-const KEEP_AWAKE_TAG = "run-recorder";
 
 /** Chicago — the Bean. Where the camera starts before the first fix. */
 const FALLBACK: [number, number] = [-87.6233, 41.8827];
@@ -47,16 +45,6 @@ export default function Record() {
   const [uploadError, setUploadError] = useState<string | null>(null);
 
   const active = status === "recording" || status === "paused";
-
-  // Location updates stop when the phone locks, so the screen has to
-  // stay on for the whole run.
-  useEffect(() => {
-    if (!active) return;
-    activateKeepAwakeAsync(KEEP_AWAKE_TAG);
-    return () => {
-      deactivateKeepAwake(KEEP_AWAKE_TAG);
-    };
-  }, [active]);
 
   const path = useMemo(
     () =>

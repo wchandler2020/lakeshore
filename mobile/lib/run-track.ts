@@ -54,6 +54,20 @@ const EARTH_RADIUS_M = 6_371_008.8;
 export const MIN_SEGMENT_M = 5.0;
 export const MAX_PLAUSIBLE_SPEED_MS = 12.0;
 
+// Fixes worse than this are dropped entirely. The first few fixes after
+// the GPS wakes up are often 50–100 m off and would show up as a jump.
+export const MAX_HORIZONTAL_ACCURACY_M = 30;
+
+/** A raw GPS fix, independent of the location library. */
+export interface Fix {
+  at: number;
+  lat: number;
+  lng: number;
+  ele: number | null;
+  /** Horizontal accuracy in meters, or null if the platform didn't say. */
+  accuracy: number | null;
+}
+
 export function haversineM(lat1: number, lng1: number, lat2: number, lng2: number): number {
   const toRad = (deg: number) => (deg * Math.PI) / 180;
   const dLat = toRad(lat2 - lat1);
@@ -62,6 +76,19 @@ export function haversineM(lat1: number, lng1: number, lat2: number, lng2: numbe
     Math.sin(dLat / 2) ** 2 +
     Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLng / 2) ** 2;
   return 2 * EARTH_RADIUS_M * Math.asin(Math.sqrt(a));
+}
+
+/**
+ * The point event to record for a fix, or null if the fix should be
+ * dropped: nothing is recording, it's too inaccurate, or it predates the
+ * current segment (iOS can hand back a cached fix from before a start or
+ * resume).
+ */
+export function pointFromFix(state: RunState | null, fix: Fix): RunEvent | null {
+  if (state?.status !== "recording" || state.segmentStart === null) return null;
+  if (fix.at < state.segmentStart) return null;
+  if (fix.accuracy !== null && fix.accuracy > MAX_HORIZONTAL_ACCURACY_M) return null;
+  return { type: "point", at: fix.at, lat: fix.lat, lng: fix.lng, ele: fix.ele };
 }
 
 export function activeElapsedMs(state: RunState, now: number): number {

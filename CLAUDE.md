@@ -95,6 +95,13 @@ NativeWind v4 (Tailwind 3) is wired through `metro.config.js` → `global.css`. 
   output (it was once 62,907 lines instead of 15). Afterwards you must
   `rm -rf ios/Pods ios/build ~/Library/Developer/Xcode/DerivedData/mobile-*`,
   reinstall pods and rebuild, or the app dies at launch with a dyld error.
+- Run recording keeps going with the screen off on foreground ("While Using") location
+  permission alone: `lib/run-location-task.ts` starts updates with an Android foreground
+  service, and iOS needs only the `location` background mode. This was verified on a device:
+  a run recorded 189 events with the permission set to "Keep Only While Using". Don't add a
+  background ("Always") permission request for recording. It would only be needed to
+  auto-detect run starts. The "always" Info.plist strings are set to `false` in `app.json`
+  because leaving the keys out makes the expo-location plugin write a generic default.
 - NativeWind is pinned to v4 with Tailwind v3. v4 does not support Tailwind v4.
 - `AUTH_USER_MODEL` is locked; changing it requires dropping the database.
 

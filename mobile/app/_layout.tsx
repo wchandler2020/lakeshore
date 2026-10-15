@@ -21,6 +21,8 @@ import { useEffect } from "react";
 
 import { AuthProvider, useAuth } from "@/lib/auth-context";
 import "@/lib/mapbox";
+// Defines the background location task; must load before any screen.
+import "@/lib/run-location-task";
 
 import "../global.css";
 
